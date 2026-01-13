@@ -3,3 +3,5 @@ moviepy==1.0.3
 openai-whisper
 numpy
 ffmpeg-python
+imageio==2.4.1
+imageio-ffmpeg==0.4.2
