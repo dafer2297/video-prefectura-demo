@@ -60,7 +60,7 @@ if uploaded_file is not None:
 
             # 3. Buscar Logo (Automático)
             # Buscamos si existe alguno de estos nombres
-            posibles_logos = ["logo.png", "Logo.png", "LOGO.png"]
+            posibles_logos = ["logo.png"]
             logo_real = next((f for f in posibles_logos if os.path.exists(f)), None)
             
             clips_a_mezclar = [video] + subtitle_clips
@@ -80,7 +80,7 @@ if uploaded_file is not None:
             video_procesado.audio = video.audio
             
             # 4. Añadir Outro
-            posibles_outros = ["outro.mp4", "Outro.mp4", "OUTRO.mp4"]
+            posibles_outros = ["outro.mp4"]
             outro_real = next((f for f in posibles_outros if os.path.exists(f)), None)
             
             if outro_real:
