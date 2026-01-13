@@ -4,15 +4,19 @@ from moviepy.config import change_settings
 import whisper
 import tempfile
 import os
-import math
 
-# Configuración para que funcione ImageMagick en la nube
+# Configuración necesaria para la nube
 change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
 
-st.title("🎬 Editor Automático Pro: Subtítulos + Branding")
-st.markdown("### Prefectura del Azuay")
+st.title("Versión 3: Audio Reparado + Subtítulos Visibles")
 
-uploaded_file = st.file_uploader("Sube el video crudo (.mp4)", type=["mp4"])
+# --- DIAGNÓSTICO DE ARCHIVOS (Esto te dirá qué nombres ve el sistema) ---
+st.write("📂 **Archivos detectados en la carpeta:**")
+archivos_en_carpeta = os.listdir(".")
+st.code(archivos_en_carpeta) # Muestra la lista en pantalla
+# -----------------------------------------------------------------------
+
+uploaded_file = st.file_uploader("Sube tu video aquí", type=["mp4"])
 
 if uploaded_file is not None:
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
@@ -21,79 +25,95 @@ if uploaded_file is not None:
     
     st.video(video_path)
 
-    if st.button("🚀 Procesar Video Completo"):
-        status = st.empty()
+    if st.button("🔴 Procesar Video (Con Audio y Subs)"):
+        st.info("Iniciando procesamiento... Por favor espera.")
         bar = st.progress(0)
         
         try:
             # 1. Cargar Video
-            status.text("Cargando video...")
             video = mp.VideoFileClip(video_path)
             
-            # 2. Generar Subtítulos con IA
-            status.text("Escuchando audio y generando textos...")
-            bar.progress(20)
-            model = whisper.load_model("tiny") # Modelo rápido
+            # 2. Generar Subtítulos (IA)
+            model = whisper.load_model("tiny")
             result = model.transcribe(video_path)
             
-            # Crear clips de texto
             subtitle_clips = []
             for segment in result["segments"]:
-                # Configuración del estilo del subtítulo
+                # ESTILO INSTAGRAM: Texto blanco con borde negro
                 txt_clip = mp.TextClip(
                     segment["text"], 
-                    fontsize=24, 
+                    fontsize=video.h * 0.05, # El tamaño depende de la altura del video (5%)
                     color='white', 
-                    bg_color='rgba(0,0,0,0.6)', # Fondo semitransparente
-                    font='Arial-Bold',
+                    font='Arial-Bold', 
+                    stroke_color='black', # Borde negro para legibilidad
+                    stroke_width=2,
                     method='caption',
-                    size=(video.w * 0.9, None) # Ancho del 90% del video
+                    size=(video.w * 0.9, None) # Ancho máximo
                 )
                 txt_clip = txt_clip.set_start(segment["start"]).set_end(segment["end"])
-                txt_clip = txt_clip.set_position(('center', 'bottom')) # Ubicación abajo
+                
+                # POSICIÓN: 'center' horizontal, y al 80% de altura (no al fondo del todo)
+                txt_clip = txt_clip.set_position(('center', 0.8), relative=True)
                 subtitle_clips.append(txt_clip)
             
-            # Unir video con subtítulos
-            video_con_subs = mp.CompositeVideoClip([video] + subtitle_clips)
-            bar.progress(50)
+            bar.progress(40)
 
-            # 3. Añadir Logo (Intenta buscar logo.png o Logo.png)
-            status.text("Añadiendo identidad visual...")
-            logo_file = "logo.png" if os.path.exists("logo.png") else "Logo.png"
+            # 3. Buscar Logo (Automático)
+            # Buscamos si existe alguno de estos nombres
+            posibles_logos = ["logo.png", "Logo.png", "LOGO.png"]
+            logo_real = next((f for f in posibles_logos if os.path.exists(f)), None)
             
-            if os.path.exists(logo_file):
-                logo = mp.ImageClip(logo_file).resize(height=80)
+            clips_a_mezclar = [video] + subtitle_clips
+            
+            if logo_real:
+                logo = mp.ImageClip(logo_real).resize(height=video.h * 0.1) # 10% de altura
                 logo = logo.set_duration(video.duration)
                 logo = logo.margin(right=20, top=20, opacity=0).set_pos(("right","top"))
-                video_con_subs = mp.CompositeVideoClip([video_con_subs, logo])
+                clips_a_mezclar.append(logo)
             else:
-                st.warning(f"No encontré {logo_file}, revisa el nombre en GitHub.")
+                st.warning("⚠️ No encontré el archivo del logo (revisa la lista de arriba).")
 
-            # 4. Añadir Cierre (Intenta buscar outro.mp4 o Outro.mp4)
-            outro_file = "outro.mp4" if os.path.exists("outro.mp4") else "Outro.mp4"
+            # Mezclar todo (Video + Subs + Logo)
+            video_procesado = mp.CompositeVideoClip(clips_a_mezclar)
             
-            if os.path.exists(outro_file):
-                outro = mp.VideoFileClip(outro_file)
-                # Ajustar tamaño del outro al video principal
-                if outro.w != video.w:
-                    outro = outro.resize(width=video.w)
-                final_video = mp.concatenate_videoclips([video_con_subs, outro])
+            # FORZAR AUDIO: Aseguramos que el video final tenga el audio del original
+            video_procesado.audio = video.audio
+            
+            # 4. Añadir Outro
+            posibles_outros = ["outro.mp4", "Outro.mp4", "OUTRO.mp4"]
+            outro_real = next((f for f in posibles_outros if os.path.exists(f)), None)
+            
+            if outro_real:
+                outro = mp.VideoFileClip(outro_real)
+                # Ajustar tamaño
+                if outro.w != video_procesado.w:
+                    outro = outro.resize(width=video_procesado.w)
+                
+                final_video = mp.concatenate_videoclips([video_procesado, outro])
             else:
-                final_video = video_con_subs
-                st.warning(f"No encontré {outro_file}, revisa el nombre en GitHub.")
+                final_video = video_procesado
+                st.warning("⚠️ No encontré el archivo de cierre (revisa la lista de arriba).")
 
-            # 5. Exportar
-            status.text("Renderizando video final (esto toma tiempo)...")
-            bar.progress(80)
-            output_path = "video_final_con_subs.mp4"
-            final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", preset="ultrafast", remove_temp=False)
+            bar.progress(70)
+            
+            # 5. Exportar (Configuración especial para audio)
+            output_path = "video_final_v3.mp4"
+            final_video.write_videofile(
+                output_path, 
+                codec="libx264", 
+                audio_codec="aac", # Codec de audio estándar
+                temp_audiofile='temp-audio.m4a', 
+                remove_temp=True, 
+                preset="ultrafast"
+            )
             
             bar.progress(100)
-            status.success("¡Video Listo!")
+            st.success("¡Video generado con sonido!")
+            
             st.video(output_path)
             
-            with open(output_path, "rb") as file:
-                st.download_button("Descargar Video", file, "video_prefectura_subs.mp4")
+            with open(output_path, "rb") as f:
+                st.download_button("Descargar Video Final", f, "video_listo.mp4")
 
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error técnico: {e}")
