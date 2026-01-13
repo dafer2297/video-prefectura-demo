@@ -1,95 +1,99 @@
 import streamlit as st
 import moviepy.editor as mp
+from moviepy.config import change_settings
 import whisper
 import tempfile
 import os
+import math
 
-st.title("🎥 Prototipo: Editor de Video Automático")
-st.markdown("### Prefectura del Azuay - Prueba de Concepto")
+# Configuración para que funcione ImageMagick en la nube
+change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
 
-# Carga del video
+st.title("🎬 Editor Automático Pro: Subtítulos + Branding")
+st.markdown("### Prefectura del Azuay")
+
 uploaded_file = st.file_uploader("Sube el video crudo (.mp4)", type=["mp4"])
 
 if uploaded_file is not None:
-    # 1. Guardar el video subido en un archivo temporal
     tfile = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4')
     tfile.write(uploaded_file.read())
     video_path = tfile.name
     
     st.video(video_path)
-    st.write("Video cargado. Presiona el botón para editar.")
 
-    if st.button("🚀 Iniciar Procesamiento Automático"):
-        progress_bar = st.progress(0)
-        status_text = st.empty()
+    if st.button("🚀 Procesar Video Completo"):
+        status = st.empty()
+        bar = st.progress(0)
         
         try:
-            # --- FASE 1: EDICIÓN DE VIDEO (LOGO + CIERRE) ---
-            status_text.text("1/3 Procesando video: Añadiendo logo y cierre...")
+            # 1. Cargar Video
+            status.text("Cargando video...")
+            video = mp.VideoFileClip(video_path)
             
-            # Cargar clips
-            clip_principal = mp.VideoFileClip(video_path)
-            
-            # Intentar cargar outro, si no existe, avisa pero no falla
-            try:
-                clip_outro = mp.VideoFileClip("outro.mp4")
-                # Si el outro es muy grande, lo ajustamos al tamaño del video principal
-                if clip_outro.w != clip_principal.w:
-                    clip_outro = clip_outro.resize(width=clip_principal.w)
-            except:
-                st.warning("No se encontró 'outro.mp4', se saltará este paso.")
-                clip_outro = None
-
-            # Configurar Logo
-            try:
-                logo = mp.ImageClip("logo.png")
-                logo = logo.resize(height=clip_principal.h * 0.15) # Logo al 15% de altura
-                logo = logo.set_duration(clip_principal.duration)
-                logo = logo.set_pos(("right", "top")) # Posición
-                logo = logo.margin(right=20, top=20, opacity=0)
-                
-                # Unir video + logo
-                clip_con_logo = mp.CompositeVideoClip([clip_principal, logo])
-            except:
-                st.warning("No se encontró 'logo.png', se saltará el logo.")
-                clip_con_logo = clip_principal
-
-            # Unir todo con el cierre
-            if clip_outro:
-                video_final_editado = mp.concatenate_videoclips([clip_con_logo, clip_outro])
-            else:
-                video_final_editado = clip_con_logo
-            
-            progress_bar.progress(50)
-            
-            # --- FASE 2: INTELIGENCIA ARTIFICIAL (SUBTÍTULOS) ---
-            status_text.text("2/3 Escuchando audio para generar subtítulos (IA)...")
-            
-            # Cargamos el modelo más ligero ('tiny') para que funcione rápido en la nube
-            model = whisper.load_model("tiny")
+            # 2. Generar Subtítulos con IA
+            status.text("Escuchando audio y generando textos...")
+            bar.progress(20)
+            model = whisper.load_model("tiny") # Modelo rápido
             result = model.transcribe(video_path)
-            texto_detectado = result["text"]
             
-            progress_bar.progress(80)
+            # Crear clips de texto
+            subtitle_clips = []
+            for segment in result["segments"]:
+                # Configuración del estilo del subtítulo
+                txt_clip = mp.TextClip(
+                    segment["text"], 
+                    fontsize=24, 
+                    color='white', 
+                    bg_color='rgba(0,0,0,0.6)', # Fondo semitransparente
+                    font='Arial-Bold',
+                    method='caption',
+                    size=(video.w * 0.9, None) # Ancho del 90% del video
+                )
+                txt_clip = txt_clip.set_start(segment["start"]).set_end(segment["end"])
+                txt_clip = txt_clip.set_position(('center', 'bottom')) # Ubicación abajo
+                subtitle_clips.append(txt_clip)
             
-            # --- FASE 3: EXPORTAR ---
-            status_text.text("3/3 Renderizando video final... espera un momento.")
+            # Unir video con subtítulos
+            video_con_subs = mp.CompositeVideoClip([video] + subtitle_clips)
+            bar.progress(50)
+
+            # 3. Añadir Logo (Intenta buscar logo.png o Logo.png)
+            status.text("Añadiendo identidad visual...")
+            logo_file = "logo.png" if os.path.exists("logo.png") else "Logo.png"
             
-            output_path = "video_procesado.mp4"
-            # Usamos preset 'ultrafast' para que no demore en la reunión
-            video_final_editado.write_videofile(output_path, codec="libx264", preset="ultrafast")
+            if os.path.exists(logo_file):
+                logo = mp.ImageClip(logo_file).resize(height=80)
+                logo = logo.set_duration(video.duration)
+                logo = logo.margin(right=20, top=20, opacity=0).set_pos(("right","top"))
+                video_con_subs = mp.CompositeVideoClip([video_con_subs, logo])
+            else:
+                st.warning(f"No encontré {logo_file}, revisa el nombre en GitHub.")
+
+            # 4. Añadir Cierre (Intenta buscar outro.mp4 o Outro.mp4)
+            outro_file = "outro.mp4" if os.path.exists("outro.mp4") else "Outro.mp4"
             
-            progress_bar.progress(100)
-            status_text.success("¡Procesamiento Completado!")
+            if os.path.exists(outro_file):
+                outro = mp.VideoFileClip(outro_file)
+                # Ajustar tamaño del outro al video principal
+                if outro.w != video.w:
+                    outro = outro.resize(width=video.w)
+                final_video = mp.concatenate_videoclips([video_con_subs, outro])
+            else:
+                final_video = video_con_subs
+                st.warning(f"No encontré {outro_file}, revisa el nombre en GitHub.")
+
+            # 5. Exportar
+            status.text("Renderizando video final (esto toma tiempo)...")
+            bar.progress(80)
+            output_path = "video_final_con_subs.mp4"
+            final_video.write_videofile(output_path, codec="libx264", audio_codec="aac", preset="ultrafast", remove_temp=False)
             
-            # Mostrar resultados
-            st.markdown("#### Resultado:")
+            bar.progress(100)
+            status.success("¡Video Listo!")
             st.video(output_path)
             
-            st.info(f"📝 **Transcripción detectada por IA (Para subtítulos):**\n\n{texto_detectado}")
-            
             with open(output_path, "rb") as file:
-                st.download_button("Descargar Video Final", file, "video_prefectura.mp4")
+                st.download_button("Descargar Video", file, "video_prefectura_subs.mp4")
 
         except Exception as e:
-            st.error(f"Ocurrió un error técnico: {e}")
+            st.error(f"Error: {e}")
